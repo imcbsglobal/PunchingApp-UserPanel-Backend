@@ -16,10 +16,10 @@ exports.getCustomers = asyncHandler(async (req, res) => {
 
 exports.punchIn = asyncHandler(async (req, res) => {
   const { customerName, photo, punchInLocation, punchInTime } = req.body;
-  if (!customerName || !photo || !punchInLocation || !punchInTime) {
+  if (!punchInLocation || !punchInTime) {
     return res.status(400).json({
       status: "fail",
-      message: "Provide customerName, photo, punchInLocation and punchInTime",
+      message: "Provide punchInLocation and punchInTime",
     });
   }
 
@@ -34,25 +34,28 @@ exports.punchIn = asyncHandler(async (req, res) => {
   // 2) Derive punchDate (yyyy‑MM‑dd) in IST
   const punchDate = dt.toISODate(); // e.g. "2025-04-22"
 
-  // 3) Persist
+  // 3) Persist - now includes username from req.user
   const record = await PunchModel.createPunchIn({
     punchDate,
     punchInTime: dt.toISO(), // ISO string including time zone offset
     punchInLocation,
-    photo,
+    photo: photo || null, // Allow photo to be added later
     clientId: req.user.client_id,
-    customerName,
+    customerName: customerName || null, // Allow customerName to be added later
+    username: req.user.id, // Add username from auth token
+    status: "PENDING", // Set initial status as PENDING
   });
 
   res.status(201).json({ status: "success", data: record });
 });
 
 exports.punchOut = asyncHandler(async (req, res) => {
-  const { id, punchOutLocation, punchOutTime } = req.body;
-  if (!id || !punchOutLocation || !punchOutTime) {
+  const { id, customerName, photo, punchOutLocation, punchOutTime } = req.body;
+  if (!id || !punchOutLocation || !punchOutTime || !photo || !customerName) {
     return res.status(400).json({
       status: "fail",
-      message: "Provide id, punchOutLocation and punchOutTime",
+      message:
+        "Provide id, punchOutLocation, photo, customerName and punchOutTime",
     });
   }
 
@@ -64,8 +67,13 @@ exports.punchOut = asyncHandler(async (req, res) => {
       .json({ status: "fail", message: "Record not found" });
   }
 
-  console.log("Raw punch_in_time from DB:", existing.punch_in_time);
-  console.log("Type:", typeof existing.punch_in_time);
+  // Verify this punch record belongs to current user (if username field exists)
+  if (existing.username && existing.username !== req.user.id) {
+    return res.status(403).json({
+      status: "fail",
+      message: "Not authorized to update this punch record",
+    });
+  }
 
   // 2) Parse the times differently based on type
   let inTime;
@@ -81,9 +89,6 @@ exports.punchOut = asyncHandler(async (req, res) => {
   }
 
   const outTime = DateTime.fromISO(punchOutTime);
-
-  //   console.log("🕒 inTime parsed =", inTime.toString());
-  //   console.log("🕒 outTime parsed =", outTime.toString());
 
   if (!inTime.isValid || !outTime.isValid) {
     return res.status(400).json({
@@ -101,13 +106,45 @@ exports.punchOut = asyncHandler(async (req, res) => {
   }
   const totalTimeSpent = Math.floor(diffSeconds);
 
-  // 4) Persist
+  // 4) Persist with updated fields
   const updated = await PunchModel.updatePunchOut({
     id,
     punchOutTime: outTime.toISO(),
     punchOutLocation,
     totalTimeSpent,
+    status: "COMPLETED",
+    customerName: customerName || existing.customer_name,
+    photo: photo || existing.photo,
   });
 
   res.status(200).json({ status: "success", data: updated });
+});
+
+// New endpoint to get pending punches for current user
+exports.getPendingPunches = asyncHandler(async (req, res) => {
+  const username = req.user.id;
+  const pendingPunches = await PunchModel.findPendingPunchesByUser(username);
+
+  res.status(200).json({
+    status: "success",
+    results: pendingPunches.length,
+    data: pendingPunches,
+  });
+});
+
+// Optional: Add endpoint to get completed punches for current user
+exports.getCompletedPunches = asyncHandler(async (req, res) => {
+  const username = req.user.id;
+  const limit = req.query.limit ? parseInt(req.query.limit) : 10;
+
+  const completedPunches = await PunchModel.findCompletedPunchesByUser(
+    username,
+    limit
+  );
+
+  res.status(200).json({
+    status: "success",
+    results: completedPunches.length,
+    data: completedPunches,
+  });
 });
