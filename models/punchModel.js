@@ -16,7 +16,7 @@ module.exports = {
     punchDate,
     punchInTime,
     punchInLocation,
-    photo,
+    photoFilename,
     clientId,
     customerName,
     username,
@@ -24,21 +24,21 @@ module.exports = {
   }) {
     const { rows } = await pool.query(
       `INSERT INTO punch_records
-        (punch_date,
-         punch_in_time,
-         punch_in_location,
-         photo,
-         client_id,
-         customer_name,
-         username,
-         status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        (punch_date, 
+         punch_in_time, 
+         punch_in_location, 
+         photo_filename,
+         client_id, 
+         customer_name, 
+         username, 
+         status) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
        RETURNING *`,
       [
         punchDate,
         punchInTime,
         punchInLocation,
-        photo,
+        photoFilename,
         clientId,
         customerName,
         username,
@@ -65,7 +65,7 @@ module.exports = {
     totalTimeSpent,
     status,
     customerName,
-    photo,
+    photoFilename,
   }) {
     // Create a base query
     let query = `
@@ -92,10 +92,10 @@ module.exports = {
       params.push(customerName);
     }
 
-    // Conditionally add photo if provided
-    if (photo) {
-      query += `, photo = $${++paramCount}`;
-      params.push(photo);
+    // Conditionally add photoFilename if provided
+    if (photoFilename) {
+      query += `, photo_filename = $${++paramCount}`;
+      params.push(photoFilename);
     }
 
     // Add WHERE clause and RETURNING
@@ -109,7 +109,7 @@ module.exports = {
   /** 5) Get all punches by client ID */
   async getPunchesByClient(clientId) {
     const { rows } = await pool.query(
-      `SELECT *
+      `SELECT * 
          FROM punch_records
         WHERE client_id = $1
         ORDER BY punch_date DESC, punch_in_time DESC`,
@@ -121,7 +121,7 @@ module.exports = {
   /** 6) New function: Get pending punches for a specific user */
   async findPendingPunchesByUser(username) {
     const { rows } = await pool.query(
-      `SELECT *
+      `SELECT * 
          FROM punch_records
         WHERE username = $1 AND (status = 'PENDING' OR status IS NULL)
         ORDER BY punch_date DESC, punch_in_time DESC`,
@@ -133,7 +133,7 @@ module.exports = {
   /** 7) Bonus function: Get completed punches for a specific user */
   async findCompletedPunchesByUser(username, limit = 10) {
     const { rows } = await pool.query(
-      `SELECT *
+      `SELECT * 
          FROM punch_records
         WHERE username = $1 AND status = 'COMPLETED'
         ORDER BY punch_date DESC, punch_in_time DESC
