@@ -16,6 +16,7 @@ app.use(helmet());
 const allowedOrigins = [
   "https://peekayadmin.imcbs.com",
   "http://localhost:5173",
+  "http://localhost:5174",
 ];
 app.use(
   cors({
@@ -23,6 +24,8 @@ app.use(
     credentials: true,
   })
 );
+
+app.options("*", cors());
 
 app.use(express.json());
 
