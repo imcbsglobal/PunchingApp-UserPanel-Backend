@@ -12,12 +12,18 @@ const { setupCleanupJob } = require("./config/fileStorage"); // Add this import
 const app = express();
 
 app.use(helmet());
+
+const allowedOrigins = [
+  "https://peekayadmin.imcbs.com",
+  "http://localhost:5173",
+];
 app.use(
   cors({
-    origin: "https://peekayadmin.imcbs.com",
-    credentials: true, // Only if your frontend needs to send credentials (cookies/auth headers)
+    origin: allowedOrigins,
+    credentials: true,
   })
 );
+
 app.use(express.json());
 
 // Health route
