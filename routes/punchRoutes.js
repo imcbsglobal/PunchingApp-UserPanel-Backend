@@ -6,27 +6,34 @@ const {
   punchOut,
   getPendingPunches,
   getCompletedPunches,
+  getPunchById,
+  getPunchesByDate,
+  getRecentPunches,
 } = require("../controllers/punchController");
 const { protect } = require("../middleware/auth");
-const { upload } = require("../config/fileStorage"); // Import the upload middleware
+const { upload } = require("../config/fileStorage");
 const router = express.Router();
 
 router.use(protect);
 
-router.get("/customers", getCustomers); // for dropdown
+// For customer dropdown
+router.get("/customers", getCustomers);
 
-// Add upload.single('photo') middleware to handle photo uploads
-router.post("/punch-in", upload.single("photo"), punchIn); // record in
-router.post("/punch-out", upload.single("photo"), punchOut); // record out
+// Punch-in with required photo and customer data
+router.post("/punch-in", upload.single("photo"), punchIn);
 
+// Punch-out with optional photo
+router.post("/punch-out", upload.single("photo"), punchOut);
+
+// Get pending and completed punches for current user
 router.get("/pending", getPendingPunches);
 router.get("/completed", getCompletedPunches);
 
-// // Add to your routes for testing only - REMOVE in production
-// router.get("/test-cleanup", async (req, res) => {
-//   const { testCleanup } = require("../config/fileStorage");
-//   await testCleanup();
-//   res.send("Cleanup test executed");
-// });
+// Admin dashboard routes for viewing all records
+router.get("/date/:date", getPunchesByDate); // Get punches for specific date
+router.get("/recent", getRecentPunches); // Get recent punches (default 5 days)
+
+// Get specific punch by ID (must be last to not conflict with other routes)
+router.get("/:id", getPunchById);
 
 module.exports = router;

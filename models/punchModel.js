@@ -40,7 +40,7 @@ module.exports = {
         punchInLocation,
         photoFilename,
         clientId,
-        customerName,
+        customerName, // Now required
         username,
         status || "PENDING",
       ]
@@ -48,7 +48,7 @@ module.exports = {
     return rows[0];
   },
 
-  /** 3) Get punch by ID (optional: client-scope it if needed) */
+  /** 3) Get punch by ID */
   async findPunchById(id) {
     const { rows } = await pool.query(
       "SELECT * FROM punch_records WHERE id = $1",
@@ -57,23 +57,24 @@ module.exports = {
     return rows[0];
   },
 
-  /** 4) Update punch-out and calculate total time, now with status update */
+  /** 4) Update punch-out and calculate total time */
   async updatePunchOut({
     id,
     punchOutTime,
     punchOutLocation,
+    punchOutDate, // Added punchOutDate parameter
     totalTimeSpent,
     status,
-    customerName,
     photoFilename,
   }) {
-    // Create a base query
+    // Create a base query with punch_out_date field
     let query = `
       UPDATE punch_records
       SET punch_out_time = $1,
           punch_out_location = $2,
-          total_time_spent = make_interval(secs => $3),
-          status = $4,
+          punch_out_date = $3,
+          total_time_spent = make_interval(secs => $4),
+          status = $5,
           updated_at = NOW()
     `;
 
@@ -81,16 +82,11 @@ module.exports = {
     const params = [
       punchOutTime,
       punchOutLocation,
+      punchOutDate, // Store the punch out date separately
       totalTimeSpent,
       status || "COMPLETED",
     ];
-    let paramCount = 4;
-
-    // Conditionally add customerName if provided
-    if (customerName) {
-      query += `, customer_name = $${++paramCount}`;
-      params.push(customerName);
-    }
+    let paramCount = 5;
 
     // Conditionally add photoFilename if provided
     if (photoFilename) {
@@ -118,7 +114,7 @@ module.exports = {
     return rows;
   },
 
-  /** 6) New function: Get pending punches for a specific user */
+  /** 6) Get pending punches for a specific user */
   async findPendingPunchesByUser(username) {
     const { rows } = await pool.query(
       `SELECT * 
@@ -130,7 +126,7 @@ module.exports = {
     return rows;
   },
 
-  /** 7) Bonus function: Get completed punches for a specific user */
+  /** 7) Get completed punches for a specific user */
   async findCompletedPunchesByUser(username, limit = 10) {
     const { rows } = await pool.query(
       `SELECT * 
@@ -139,6 +135,33 @@ module.exports = {
         ORDER BY punch_date DESC, punch_in_time DESC
         LIMIT $2`,
       [username, limit]
+    );
+    return rows;
+  },
+
+  /** 8) Find punches by specific date for admin dashboard */
+  async findPunchesByDate(date, clientId) {
+    const { rows } = await pool.query(
+      `SELECT p.*, u.name as user_name
+         FROM punch_records p
+         LEFT JOIN users u ON p.username = u.id
+        WHERE p.punch_date = $1 AND p.client_id = $2
+        ORDER BY p.punch_in_time DESC`,
+      [date, clientId]
+    );
+    return rows;
+  },
+
+  /** 9) Find recent punches (last X days) for admin dashboard */
+  async findRecentPunches(days, clientId) {
+    const { rows } = await pool.query(
+      `SELECT p.*, u.name as user_name
+         FROM punch_records p
+         LEFT JOIN users u ON p.username = u.id
+        WHERE p.punch_date >= CURRENT_DATE - INTERVAL '$1 days'
+          AND p.client_id = $2
+        ORDER BY p.punch_date DESC, p.punch_in_time DESC`,
+      [days, clientId]
     );
     return rows;
   },

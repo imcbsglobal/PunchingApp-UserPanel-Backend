@@ -17,12 +17,14 @@ exports.getCustomers = asyncHandler(async (req, res) => {
 });
 
 exports.punchIn = asyncHandler(async (req, res) => {
-  // No need for photo field here since we'll handle it separately
-  const { customerName, punchInLocation, punchInTime } = req.body;
-  if (!punchInLocation || !punchInTime) {
+  // Now customerName is required
+  const { customerName, punchInLocation, punchInTime, punchDate } = req.body;
+
+  if (!customerName || !punchInLocation || !punchInTime || !punchDate) {
     return res.status(400).json({
       status: "fail",
-      message: "Provide punchInLocation and punchInTime",
+      message:
+        "Provide customerName, punchInLocation, punchInTime, and punchDate",
     });
   }
 
@@ -34,22 +36,36 @@ exports.punchIn = asyncHandler(async (req, res) => {
       .json({ status: "fail", message: "Invalid punchInTime format" });
   }
 
-  // 2) Derive punchDate (yyyy‑MM‑dd) in IST
-  const punchDate = dt.toISODate(); // e.g. "2025-04-22"
+  // 2) Use punchDate from frontend, but validate it
+  const dateParts = punchDate.split("-");
+  if (dateParts.length !== 3 || !/^\d{4}-\d{2}-\d{2}$/.test(punchDate)) {
+    return res
+      .status(400)
+      .json({
+        status: "fail",
+        message: "Invalid punchDate format. Use YYYY-MM-DD",
+      });
+  }
 
-  // 3) Get photo filename if available (if user uploads during punch-in)
+  // 3) Get photo filename if available (required for punch-in)
   const photoFilename = req.file ? req.file.filename : null;
+  if (!photoFilename) {
+    return res.status(400).json({
+      status: "fail",
+      message: "Photo is required for punch-in",
+    });
+  }
 
-  // 4) Persist - now includes username from req.user
+  // 4) Persist with required customer name
   const record = await PunchModel.createPunchIn({
     punchDate,
     punchInTime: dt.toISO(), // ISO string including time zone offset
     punchInLocation,
-    photoFilename: photoFilename, // Store filename instead of binary data
+    photoFilename,
     clientId: req.user.client_id,
-    customerName: customerName || null, // Allow customerName to be added later
-    username: req.user.id, // Add username from auth token
-    status: "PENDING", // Set initial status as PENDING
+    customerName, // Now required
+    username: req.user.id,
+    status: "PENDING",
   });
 
   // Add photo URL to response
@@ -61,11 +77,12 @@ exports.punchIn = asyncHandler(async (req, res) => {
 });
 
 exports.punchOut = asyncHandler(async (req, res) => {
-  const { id, customerName, punchOutLocation, punchOutTime } = req.body;
-  if (!id || !punchOutLocation || !punchOutTime || !customerName) {
+  const { id, punchOutLocation, punchOutTime, punchOutDate } = req.body;
+
+  if (!id || !punchOutLocation || !punchOutTime || !punchOutDate) {
     return res.status(400).json({
       status: "fail",
-      message: "Provide id, punchOutLocation, customerName and punchOutTime",
+      message: "Provide id, punchOutLocation, punchOutTime, and punchOutDate",
     });
   }
 
@@ -77,8 +94,8 @@ exports.punchOut = asyncHandler(async (req, res) => {
       .json({ status: "fail", message: "Record not found" });
   }
 
-  // Verify this punch record belongs to current user (if username field exists)
-  if (existing.username && existing.username !== req.user.id) {
+  // Verify this punch record belongs to current user
+  if (existing.username !== req.user.id) {
     return res.status(403).json({
       status: "fail",
       message: "Not authorized to update this punch record",
@@ -112,21 +129,21 @@ exports.punchOut = asyncHandler(async (req, res) => {
   if (diffSeconds < 0) {
     return res
       .status(400)
-      .json({ status: "fail", message: "Punch‑out must be after punch‑in" });
+      .json({ status: "fail", message: "Punch-out must be after punch-in" });
   }
   const totalTimeSpent = Math.floor(diffSeconds);
 
-  // 4) Get photo filename from upload middleware
+  // 4) Get photo filename from upload middleware (optional for punch-out)
   const photoFilename = req.file ? req.file.filename : null;
 
-  // 5) Persist with updated fields
+  // 5) Persist with updated fields - no need to update customer_name as it's already set during punch-in
   const updated = await PunchModel.updatePunchOut({
     id,
     punchOutTime: outTime.toISO(),
     punchOutLocation,
+    punchOutDate, // Add the punch-out date
     totalTimeSpent,
     status: "COMPLETED",
-    customerName: customerName || existing.customer_name,
     photoFilename: photoFilename || existing.photo_filename,
   });
 
@@ -157,7 +174,7 @@ exports.getPendingPunches = asyncHandler(async (req, res) => {
   });
 });
 
-// Optional: Add endpoint to get completed punches for current user
+// Get completed punches for current user
 exports.getCompletedPunches = asyncHandler(async (req, res) => {
   const username = req.user.id;
   const limit = req.query.limit ? parseInt(req.query.limit) : 10;
@@ -178,5 +195,106 @@ exports.getCompletedPunches = asyncHandler(async (req, res) => {
     status: "success",
     results: completedPunches.length,
     data: completedPunches,
+  });
+});
+
+// Get all punch records for a specific date (for admin dashboard)
+exports.getPunchesByDate = asyncHandler(async (req, res) => {
+  // Check if user has admin privileges
+  if (!req.user.is_admin) {
+    return res.status(403).json({
+      status: "fail",
+      message: "Only admins can access all records by date",
+    });
+  }
+
+  const { date } = req.params;
+  const clientId = req.user.client_id;
+
+  // Validate date format (YYYY-MM-DD)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({
+      status: "fail",
+      message: "Invalid date format. Use YYYY-MM-DD",
+    });
+  }
+
+  // Get records for the specific date
+  const records = await PunchModel.findPunchesByDate(date, clientId);
+
+  // Add photo URLs to responses
+  records.forEach((punch) => {
+    if (punch.photo_filename) {
+      punch.photoUrl = `/uploads/${punch.photo_filename}`;
+    }
+  });
+
+  res.status(200).json({
+    status: "success",
+    results: records.length,
+    data: records,
+  });
+});
+
+// Get recent punch records (last 5 days) for admin dashboard
+exports.getRecentPunches = asyncHandler(async (req, res) => {
+  // Check if user has admin privileges
+  if (!req.user.is_admin) {
+    return res.status(403).json({
+      status: "fail",
+      message: "Only admins can access recent records",
+    });
+  }
+
+  const clientId = req.user.client_id;
+  const days = req.query.days ? parseInt(req.query.days) : 5; // Default to 5 days
+
+  // Get recent records
+  const records = await PunchModel.findRecentPunches(days, clientId);
+
+  // Add photo URLs to responses
+  records.forEach((punch) => {
+    if (punch.photo_filename) {
+      punch.photoUrl = `/uploads/${punch.photo_filename}`;
+    }
+  });
+
+  res.status(200).json({
+    status: "success",
+    results: records.length,
+    data: records,
+  });
+});
+
+// Add a new endpoint to get a specific punch record by ID
+exports.getPunchById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const username = req.user.id;
+
+  const punch = await PunchModel.findPunchById(id);
+
+  if (!punch) {
+    return res.status(404).json({
+      status: "fail",
+      message: "Punch record not found",
+    });
+  }
+
+  // Verify this punch record belongs to current user
+  if (punch.username !== username) {
+    return res.status(403).json({
+      status: "fail",
+      message: "Not authorized to access this punch record",
+    });
+  }
+
+  // Add photo URL to response
+  if (punch.photo_filename) {
+    punch.photoUrl = `/uploads/${punch.photo_filename}`;
+  }
+
+  res.status(200).json({
+    status: "success",
+    data: punch,
   });
 });
