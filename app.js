@@ -3,11 +3,9 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
-const path = require("path"); // Add this import
 const authRoutes = require("./routes/authRoutes");
 const punchRoutes = require("./routes/punchRoutes");
 const errorHandler = require("./middleware/errorHandler");
-const { setupCleanupJob } = require("./config/fileStorage"); // Add this import
 
 const app = express();
 
@@ -21,12 +19,6 @@ app.get("/health", (req, res) => {
 // auth and punch endpoints
 app.use("/api/auth", authRoutes);
 app.use("/api/punch", punchRoutes);
-
-// Add static route to serve images
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-
-// Start the image cleanup job
-setupCleanupJob();
 
 app.use(errorHandler);
 

@@ -17,6 +17,7 @@ module.exports = {
     punchInTime,
     punchInLocation,
     photoFilename,
+    photoUrl,
     clientId,
     customerName,
     username,
@@ -28,19 +29,21 @@ module.exports = {
          punch_in_time, 
          punch_in_location, 
          photo_filename,
+         photo_url,
          client_id, 
          customer_name, 
          username, 
          status) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
        RETURNING *`,
       [
         punchDate,
         punchInTime,
         punchInLocation,
         photoFilename,
+        photoUrl,
         clientId,
-        customerName, // Now required
+        customerName,
         username,
         status || "PENDING",
       ]
@@ -62,10 +65,11 @@ module.exports = {
     id,
     punchOutTime,
     punchOutLocation,
-    punchOutDate, // Added punchOutDate parameter
+    punchOutDate,
     totalTimeSpent,
     status,
     photoFilename,
+    photoUrl,
   }) {
     // Create a base query with punch_out_date field
     let query = `
@@ -82,16 +86,21 @@ module.exports = {
     const params = [
       punchOutTime,
       punchOutLocation,
-      punchOutDate, // Store the punch out date separately
+      punchOutDate,
       totalTimeSpent,
       status || "COMPLETED",
     ];
     let paramCount = 5;
 
-    // Conditionally add photoFilename if provided
+    // Conditionally add photoFilename and photoUrl if provided
     if (photoFilename) {
       query += `, photo_filename = $${++paramCount}`;
       params.push(photoFilename);
+    }
+
+    if (photoUrl) {
+      query += `, photo_url = $${++paramCount}`;
+      params.push(photoUrl);
     }
 
     // Add WHERE clause and RETURNING

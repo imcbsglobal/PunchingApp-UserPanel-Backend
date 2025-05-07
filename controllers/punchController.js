@@ -3,8 +3,7 @@ const asyncHandler = require("../middleware/asyncHandler");
 const logger = require("../config/winston");
 const PunchModel = require("../models/punchModel");
 const { DateTime } = require("luxon");
-const path = require("path");
-const { deleteImage } = require("../config/fileStorage");
+const { deleteCloudinaryImage } = require("../config/cloudinary");
 
 exports.getCustomers = asyncHandler(async (req, res) => {
   const clientId = req.user.client_id;
@@ -17,7 +16,6 @@ exports.getCustomers = asyncHandler(async (req, res) => {
 });
 
 exports.punchIn = asyncHandler(async (req, res) => {
-  // Now customerName is required
   const { customerName, punchInLocation, punchInTime, punchDate } = req.body;
 
   if (!customerName || !punchInLocation || !punchInTime || !punchDate) {
@@ -39,39 +37,36 @@ exports.punchIn = asyncHandler(async (req, res) => {
   // 2) Use punchDate from frontend, but validate it
   const dateParts = punchDate.split("-");
   if (dateParts.length !== 3 || !/^\d{4}-\d{2}-\d{2}$/.test(punchDate)) {
-    return res
-      .status(400)
-      .json({
-        status: "fail",
-        message: "Invalid punchDate format. Use YYYY-MM-DD",
-      });
+    return res.status(400).json({
+      status: "fail",
+      message: "Invalid punchDate format. Use YYYY-MM-DD",
+    });
   }
 
-  // 3) Get photo filename if available (required for punch-in)
-  const photoFilename = req.file ? req.file.filename : null;
-  if (!photoFilename) {
+  // 3) Check for uploaded image (using Cloudinary)
+  if (!req.file) {
     return res.status(400).json({
       status: "fail",
       message: "Photo is required for punch-in",
     });
   }
 
+  // Get the Cloudinary URL and public ID
+  const imageUrl = req.file.path; // Cloudinary URL from multer-storage-cloudinary
+  const publicId = req.file.filename; // Cloudinary public ID
+
   // 4) Persist with required customer name
   const record = await PunchModel.createPunchIn({
     punchDate,
     punchInTime: dt.toISO(), // ISO string including time zone offset
     punchInLocation,
-    photoFilename,
+    photoFilename: publicId, // Store public ID
+    photoUrl: imageUrl, // Store full URL
     clientId: req.user.client_id,
-    customerName, // Now required
+    customerName,
     username: req.user.id,
     status: "PENDING",
   });
-
-  // Add photo URL to response
-  if (photoFilename) {
-    record.photoUrl = `/uploads/${photoFilename}`;
-  }
 
   res.status(201).json({ status: "success", data: record });
 });
@@ -133,24 +128,37 @@ exports.punchOut = asyncHandler(async (req, res) => {
   }
   const totalTimeSpent = Math.floor(diffSeconds);
 
-  // 4) Get photo filename from upload middleware (optional for punch-out)
-  const photoFilename = req.file ? req.file.filename : null;
+  // 4) Handle photo upload (optional for punch-out)
+  let photoPublicId = existing.photo_filename;
+  let photoUrl = existing.photo_url;
 
-  // 5) Persist with updated fields - no need to update customer_name as it's already set during punch-in
+  if (req.file) {
+    // If a new photo is uploaded, delete the old one if it exists
+    if (existing.photo_filename) {
+      try {
+        await deleteCloudinaryImage(existing.photo_filename);
+      } catch (err) {
+        logger.error(`Failed to delete old image: ${err.message}`);
+        // Continue anyway - don't fail the request if image deletion fails
+      }
+    }
+
+    // Update with new Cloudinary info
+    photoPublicId = req.file.filename;
+    photoUrl = req.file.path;
+  }
+
+  // 5) Persist with updated fields
   const updated = await PunchModel.updatePunchOut({
     id,
     punchOutTime: outTime.toISO(),
     punchOutLocation,
-    punchOutDate, // Add the punch-out date
+    punchOutDate,
     totalTimeSpent,
     status: "COMPLETED",
-    photoFilename: photoFilename || existing.photo_filename,
+    photoFilename: photoPublicId,
+    photoUrl: photoUrl,
   });
-
-  // Add photo URL to response
-  if (updated.photo_filename) {
-    updated.photoUrl = `/uploads/${updated.photo_filename}`;
-  }
 
   res.status(200).json({ status: "success", data: updated });
 });
@@ -159,14 +167,6 @@ exports.punchOut = asyncHandler(async (req, res) => {
 exports.getPendingPunches = asyncHandler(async (req, res) => {
   const username = req.user.id;
   const pendingPunches = await PunchModel.findPendingPunchesByUser(username);
-
-  // Add photo URLs to responses
-  pendingPunches.forEach((punch) => {
-    if (punch.photo_filename) {
-      punch.photoUrl = `/uploads/${punch.photo_filename}`;
-    }
-  });
-
   res.status(200).json({
     status: "success",
     results: pendingPunches.length,
@@ -183,13 +183,6 @@ exports.getCompletedPunches = asyncHandler(async (req, res) => {
     username,
     limit
   );
-
-  // Add photo URLs to responses
-  completedPunches.forEach((punch) => {
-    if (punch.photo_filename) {
-      punch.photoUrl = `/uploads/${punch.photo_filename}`;
-    }
-  });
 
   res.status(200).json({
     status: "success",
@@ -222,13 +215,6 @@ exports.getPunchesByDate = asyncHandler(async (req, res) => {
   // Get records for the specific date
   const records = await PunchModel.findPunchesByDate(date, clientId);
 
-  // Add photo URLs to responses
-  records.forEach((punch) => {
-    if (punch.photo_filename) {
-      punch.photoUrl = `/uploads/${punch.photo_filename}`;
-    }
-  });
-
   res.status(200).json({
     status: "success",
     results: records.length,
@@ -251,13 +237,6 @@ exports.getRecentPunches = asyncHandler(async (req, res) => {
 
   // Get recent records
   const records = await PunchModel.findRecentPunches(days, clientId);
-
-  // Add photo URLs to responses
-  records.forEach((punch) => {
-    if (punch.photo_filename) {
-      punch.photoUrl = `/uploads/${punch.photo_filename}`;
-    }
-  });
 
   res.status(200).json({
     status: "success",
@@ -286,11 +265,6 @@ exports.getPunchById = asyncHandler(async (req, res) => {
       status: "fail",
       message: "Not authorized to access this punch record",
     });
-  }
-
-  // Add photo URL to response
-  if (punch.photo_filename) {
-    punch.photoUrl = `/uploads/${punch.photo_filename}`;
   }
 
   res.status(200).json({

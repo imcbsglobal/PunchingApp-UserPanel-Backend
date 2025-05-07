@@ -11,7 +11,8 @@ const {
   getRecentPunches,
 } = require("../controllers/punchController");
 const { protect } = require("../middleware/auth");
-const { upload } = require("../config/fileStorage");
+const { uploadToCloudinary } = require("../config/cloudinary");
+
 const router = express.Router();
 
 router.use(protect);
@@ -20,10 +21,10 @@ router.use(protect);
 router.get("/customers", getCustomers);
 
 // Punch-in with required photo and customer data
-router.post("/punch-in", upload.single("photo"), punchIn);
+router.post("/punch-in", uploadToCloudinary.single("photo"), punchIn);
 
 // Punch-out with optional photo
-router.post("/punch-out", upload.single("photo"), punchOut);
+router.post("/punch-out", uploadToCloudinary.single("photo"), punchOut);
 
 // Get pending and completed punches for current user
 router.get("/pending", getPendingPunches);
