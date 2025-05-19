@@ -14,7 +14,7 @@ exports.login = asyncHandler(async (req, res) => {
   }
 
   // 2) Fetch by id
-  const user = await UserModel.findById(id);
+  const user = await UserModel.findById(id, client_id);
   if (!user) {
     return res
       .status(401)
